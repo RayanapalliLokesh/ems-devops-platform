@@ -47,7 +47,7 @@ case "$cmd" in
     run gh variable set EMS_ECR_REPOSITORY --repo "$REPO" --body "$(tf_out envs/dev ecr_repository_url)"
     run gh variable set EMS_HOST_SG_ID --repo "$REPO" --body "$(tf_out envs/dev host_security_group_id)"
     run gh variable set EMS_BACKUP_BUCKET --repo "$REPO" --body "$(tf_out envs/dev backup_bucket)"
-    run gh variable set EMS_APP_URL --repo "$REPO" --body "$(tf_out envs/dev https_url)"
+    run gh variable set EMS_APP_URL --repo "$REPO" --body "$(tf_out envs/dev app_url)"
     if $DRY_RUN; then owner_id="<owner id>"; else owner_id="$(gh api "users/${REPO%%/*}" --jq .id)"; fi
     if $DRY_RUN; then
       echo "+ gh api -X PUT repos/$REPO/environments/playground (required reviewer: $owner_id)"

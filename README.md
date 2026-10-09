@@ -13,8 +13,7 @@ developer ── git push ──► CI: lint · tests · scan · image          
                                                      │                 rollback.yml: redeploy an older tag
 Terraform (terraform/envs/dev) ──────────────────────▼──────────────────────────────────────────────────
   VPC 10.0.0.0/16 · 2 public + 2 private subnets · IGW · SG alb (80 from all) · SG host (80 from ALB, 22 admin)
-  users ─https─► API Gateway (free https://<id>.execute-api... URL, valid certificate) ─80─► ALB
-  ALB (/health check) ─80─► EC2 t3.medium (Amazon Linux 2023, configured by Ansible)
+  users ─80─► ALB (/health check) ─80─► EC2 t3.medium (Amazon Linux 2023, configured by Ansible)
                                          └─ Docker Compose: nginx :80 → app (gunicorn+Flask) :5000 → PostgreSQL :5432
                                             + Prometheus · Alertmanager · Grafana · Jaeger · node-exporter · cAdvisor
   IAM role ─► S3 backups (nightly pg_dump) · ECR pulls      CloudWatch dashboard + alarms (ALB 5xx, unhealthy, CPU)
@@ -62,10 +61,6 @@ scripts/setup-cd.sh enable                     # GitHub secrets/variables + "pla
 git tag v1.0.0 && git push origin v1.0.0       # CD: build → ECR → approve → deploy → smoke test → release
 scripts/aws/aws-playground.sh down             # destroy everything; inventory.sh --expect-empty proves it
 ```
-Open the app with the `https_url` output (`terraform -chdir=terraform/envs/dev output https_url`). Browsers and
-phones upgrade links to `https://`, and the ALB has no certificate (a trusted one needs a domain), so the plain ALB
-address only works as an explicit `http://` link. `terraform/envs/dev/https.tf` explains the choice.
-
 Playground limits that shape the design (t3 standard credits, no inline IAM policies, 3 pods per namespace, ...) are
 in `docs/aws/limits.md` and `docs/terraform/playground-quirks.md`.
 
