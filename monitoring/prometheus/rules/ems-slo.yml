@@ -1,0 +1,57 @@
+# Phase 25 - SLIs as recording rules. Two SLOs over 7 days (docs/sre/slo.md):
+#   availability: 99.5% of requests answer without a 5xx      -> error budget 0.5%
+#   latency:      95% of requests answer in under 500 ms      -> budget 5%
+# /metrics is excluded: Prometheus' own scrapes are not user traffic.
+groups:
+  - name: ems-slo-recording
+    rules:
+      - record: ems:requests:rate5m
+        expr: sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics"}[5m]))
+      - record: ems:slo_errors:ratio_rate5m
+        expr: |
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics",status=~"5.."}[5m]))
+          /
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics"}[5m]))
+      - record: ems:slo_latency:ratio_rate5m
+        expr: |
+          1 - (
+            sum(rate(ems_http_request_duration_seconds_bucket{job="ems-app",endpoint!="/metrics",le="0.5"}[5m]))
+            /
+            sum(rate(ems_http_request_duration_seconds_count{job="ems-app",endpoint!="/metrics"}[5m]))
+          )
+      - record: ems:slo_errors:ratio_rate30m
+        expr: |
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics",status=~"5.."}[30m]))
+          /
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics"}[30m]))
+      - record: ems:slo_latency:ratio_rate30m
+        expr: |
+          1 - (
+            sum(rate(ems_http_request_duration_seconds_bucket{job="ems-app",endpoint!="/metrics",le="0.5"}[30m]))
+            /
+            sum(rate(ems_http_request_duration_seconds_count{job="ems-app",endpoint!="/metrics"}[30m]))
+          )
+      - record: ems:slo_errors:ratio_rate1h
+        expr: |
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics",status=~"5.."}[1h]))
+          /
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics"}[1h]))
+      - record: ems:slo_latency:ratio_rate1h
+        expr: |
+          1 - (
+            sum(rate(ems_http_request_duration_seconds_bucket{job="ems-app",endpoint!="/metrics",le="0.5"}[1h]))
+            /
+            sum(rate(ems_http_request_duration_seconds_count{job="ems-app",endpoint!="/metrics"}[1h]))
+          )
+      - record: ems:slo_errors:ratio_rate6h
+        expr: |
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics",status=~"5.."}[6h]))
+          /
+          sum(rate(ems_http_requests_total{job="ems-app",endpoint!="/metrics"}[6h]))
+      - record: ems:slo_latency:ratio_rate6h
+        expr: |
+          1 - (
+            sum(rate(ems_http_request_duration_seconds_bucket{job="ems-app",endpoint!="/metrics",le="0.5"}[6h]))
+            /
+            sum(rate(ems_http_request_duration_seconds_count{job="ems-app",endpoint!="/metrics"}[6h]))
+          )

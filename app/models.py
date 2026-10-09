@@ -9,7 +9,7 @@ OOP concepts shown here:
   - Magic methods         (__init__, __repr__, __str__)
   - Static / class methods
 """
-from datetime import datetime, date
+from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
 
@@ -127,3 +127,29 @@ class Attendance(db.Model):
     def get_status_options(cls):
         """Class method: valid status values"""
         return cls.VALID_STATUSES
+
+
+class AlertEvent(db.Model):
+    """Phase 24 - one row per alert notification received from Alertmanager (the webhook receiver)"""
+    __tablename__ = 'alert_events'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    alertname = db.Column(db.String(120), nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False)          # firing | resolved
+    severity = db.Column(db.String(20))
+    summary = db.Column(db.Text)
+    runbook_url = db.Column(db.String(300))
+    starts_at = db.Column(db.String(40))
+    received_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'alertname': self.alertname,
+            'status': self.status,
+            'severity': self.severity,
+            'summary': self.summary,
+            'runbook_url': self.runbook_url,
+            'starts_at': self.starts_at,
+            'received_at': self.received_at.isoformat() if self.received_at else None,
+        }

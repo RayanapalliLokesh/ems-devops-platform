@@ -36,6 +36,15 @@ class Config:
 
     SEED_DEMO_DATA = os.getenv('SEED_DEMO_DATA', 'true').lower() == 'true'
 
+    # Proxies in front of the app that may set X-Forwarded-For (0 = none, 1 = nginx, 2 = ALB + nginx)
+    TRUSTED_PROXIES = int(os.getenv('TRUSTED_PROXIES', '0'))
+    # text (people) or json (one JSON object per line, for log pipelines)
+    LOG_FORMAT = os.getenv('LOG_FORMAT', 'text').lower()
+
+    # Tracing: unset endpoint = tracing off (e.g. http://jaeger:4318)
+    OTEL_EXPORTER_OTLP_ENDPOINT = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', '')
+    OTEL_SERVICE_NAME = os.getenv('OTEL_SERVICE_NAME', 'ems-app')
+
 
 class DevelopmentConfig(Config):
     DEBUG = True
@@ -57,6 +66,7 @@ class TestingConfig(Config):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'    # in-memory database
     SEED_DEMO_DATA = False
+    OTEL_EXPORTER_OTLP_ENDPOINT = ''
     LOG_FILE = None                                    # no log file during tests
 
 

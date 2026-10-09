@@ -300,3 +300,49 @@ def attendance_summary():
 @api.route('/analytics/attendance/departments', methods=['GET'])
 def department_attendance():
     return _analytics_response(get_department_attendance_stats(), 'departments')
+
+
+# ===========================================================================
+# PHASE 24 - ALERTMANAGER WEBHOOK (alert history)
+# ===========================================================================
+@api.route('/alerts', methods=['POST'])
+def receive_alerts():
+    """Alertmanager webhook: {"alerts": [{"status", "labels": {...}, "annotations": {...}, "startsAt"}]}"""
+    from app.models import AlertEvent, db
+    alerts = _json_object().get('alerts')
+    if not isinstance(alerts, list):
+        return jsonify({'error': 'alerts must be a list'}), 400
+
+    stored = 0
+    for alert in alerts:
+        if not isinstance(alert, dict):
+            continue
+        labels = alert.get('labels') if isinstance(alert.get('labels'), dict) else {}
+        annotations = alert.get('annotations') if isinstance(alert.get('annotations'), dict) else {}
+        db.session.add(AlertEvent(
+            alertname=str(labels.get('alertname', 'unknown'))[:120],
+            status=str(alert.get('status', 'firing'))[:20],
+            severity=str(labels.get('severity', ''))[:20] or None,
+            summary=annotations.get('summary'),
+            runbook_url=str(annotations.get('runbook_url', ''))[:300] or None,
+            starts_at=str(alert.get('startsAt', ''))[:40] or None,
+        ))
+        stored += 1
+        current_app.logger.warning('Alert %s: %s (%s)', alert.get('status'), labels.get('alertname'),
+                                   annotations.get('runbook_url'))
+    db.session.commit()
+    return jsonify({'received': stored}), 202
+
+
+@api.route('/alerts', methods=['GET'])
+def alert_history():
+    """GET /api/alerts?limit=50&status=firing - newest first"""
+    from app.models import AlertEvent
+    limit = request.args.get('limit', default=50, type=int)
+    if limit < 1 or limit > 500:
+        return jsonify({'error': 'limit must be between 1 and 500'}), 400
+    query = AlertEvent.query
+    if request.args.get('status'):
+        query = query.filter_by(status=request.args['status'])
+    events = [e.to_dict() for e in query.order_by(AlertEvent.id.desc()).limit(limit)]
+    return jsonify({'alerts': events, 'count': len(events)}), 200

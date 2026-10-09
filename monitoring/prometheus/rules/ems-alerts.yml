@@ -1,0 +1,147 @@
+# Phase 24-25 - every alert has severity (page | ticket) and a runbook_url; tests/test_sre.py enforces one
+# runbook per alert, and monitoring/prometheus/tests/ems-alerts-test.yml checks when they fire.
+groups:
+  - name: ems-slo-burn
+    rules:
+      # Multi-window burn rates (Google SRE workbook): long window = significant, short window = still happening
+      - alert: EMSErrorBudgetFastBurn
+        expr: |
+          ems:slo_errors:ratio_rate1h > (14.4 * 0.005)
+          and
+          ems:slo_errors:ratio_rate5m > (14.4 * 0.005)
+        for: 2m
+        labels: {severity: page, slo: availability}
+        annotations:
+          summary: "Error budget burning 14.4x too fast: 2% of the weekly budget in 1 hour"
+          description: "5xx ratio is {{ $value | humanizePercentage }} (SLO allows 0.5%)."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSErrorBudgetFastBurn.md
+      - alert: EMSErrorBudgetSlowBurn
+        expr: |
+          ems:slo_errors:ratio_rate6h > (6 * 0.005)
+          and
+          ems:slo_errors:ratio_rate30m > (6 * 0.005)
+        for: 15m
+        labels: {severity: ticket, slo: availability}
+        annotations:
+          summary: "Error budget burning 6x too fast: 5% of the weekly budget in 6 hours"
+          description: "5xx ratio over 6h is {{ $value | humanizePercentage }}."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSErrorBudgetSlowBurn.md
+      - alert: EMSLatencyBudgetFastBurn
+        expr: |
+          ems:slo_latency:ratio_rate1h > (14.4 * 0.05)
+          and
+          ems:slo_latency:ratio_rate5m > (14.4 * 0.05)
+        for: 2m
+        labels: {severity: page, slo: latency}
+        annotations:
+          summary: "Latency budget burning 14.4x too fast"
+          description: "{{ $value | humanizePercentage }} of requests are slower than 500 ms (SLO allows 5%)."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSLatencyBudgetFastBurn.md
+      - alert: EMSLatencyBudgetSlowBurn
+        expr: |
+          ems:slo_latency:ratio_rate6h > (6 * 0.05)
+          and
+          ems:slo_latency:ratio_rate30m > (6 * 0.05)
+        for: 15m
+        labels: {severity: ticket, slo: latency}
+        annotations:
+          summary: "Latency budget burning 6x too fast"
+          description: "{{ $value | humanizePercentage }} of requests over 6h are slower than 500 ms."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSLatencyBudgetSlowBurn.md
+
+  - name: ems-application
+    rules:
+      - alert: EMSAppDown
+        expr: up{job="ems-app"} == 0
+        for: 1m
+        labels: {severity: page}
+        annotations:
+          summary: "Prometheus cannot scrape the EMS application"
+          description: "{{ $labels.instance }} has not answered /metrics for 1 minute."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSAppDown.md
+      - alert: EMSDatabaseDown
+        expr: ems_db_up == 0
+        for: 1m
+        labels: {severity: page}
+        annotations:
+          summary: "The application cannot reach PostgreSQL"
+          description: "SELECT 1 fails from {{ $labels.instance }}; /health answers 503."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSDatabaseDown.md
+      - alert: EMSHighErrorRate
+        expr: ems:slo_errors:ratio_rate5m > 0.05 and ems:requests:rate5m > 0.1
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "More than 5% of requests fail with a 5xx"
+          description: "5xx ratio is {{ $value | humanizePercentage }} over 5 minutes."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSHighErrorRate.md
+      - alert: EMSHighLatency
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(ems_http_request_duration_seconds_bucket{job="ems-app",endpoint!="/metrics"}[5m]))) > 0.5
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "p95 latency above 500 ms"
+          description: "p95 is {{ $value | humanizeDuration }}."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSHighLatency.md
+      - alert: EMSNoTraffic
+        expr: ems:requests:rate5m == 0
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "The application has received no requests for 15 minutes"
+          description: "Even the load balancer health checks stopped: check the ALB, DNS and nginx."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSNoTraffic.md
+
+  - name: ems-infrastructure
+    rules:
+      - alert: HostHighCPU
+        expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 85
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Host CPU above 85% for 10 minutes"
+          description: "{{ $labels.instance }} CPU is {{ $value | printf \"%.0f\" }}%. T3 credits may be draining."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/HostHighCPU.md
+      - alert: HostHighMemory
+        expr: 100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Host memory above 90%"
+          description: "{{ $labels.instance }} memory use is {{ $value | printf \"%.0f\" }}%."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/HostHighMemory.md
+      - alert: HostDiskSpaceLow
+        expr: 100 * node_filesystem_avail_bytes{fstype!~"tmpfs|overlay",mountpoint="/"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay",mountpoint="/"} < 15
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "Less than 15% disk space left on /"
+          description: "{{ $labels.instance }} has {{ $value | printf \"%.0f\" }}% free. PostgreSQL stops when the disk is full."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/HostDiskSpaceLow.md
+      - alert: ContainerHighMemory
+        expr: |
+          container_memory_working_set_bytes{name=~"ems-.+"}
+          / on (name) (container_spec_memory_limit_bytes{name=~"ems-.+"} > 0) > 0.9
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Container {{ $labels.name }} uses more than 90% of its memory limit"
+          description: "It will be OOM-killed when it reaches the limit."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/ContainerHighMemory.md
+      - alert: ContainerRestarting
+        expr: changes(container_start_time_seconds{name=~"ems-.+"}[15m]) > 2
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: "Container {{ $labels.name }} restarted more than twice in 15 minutes"
+          description: "A crash loop: the restart policy hides it, the alert does not."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/ContainerRestarting.md
+      - alert: MonitoringTargetDown
+        expr: up{job!="ems-app"} == 0
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Monitoring target {{ $labels.job }} is down"
+          description: "{{ $labels.instance }} has not been scraped for 5 minutes: part of the platform is unobserved."
+          runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/MonitoringTargetDown.md

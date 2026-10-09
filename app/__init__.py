@@ -1,5 +1,5 @@
 """
-Application Factory with logging, error handlers and request logging
+Application Factory with logging, error handlers, request logging, metrics and tracing
 """
 import logging
 import os
@@ -7,9 +7,11 @@ from logging.handlers import RotatingFileHandler
 
 from flask import Flask, request
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from app.models import db
+from app.observability import JsonFormatter, check_database, init_observability, init_tracing
 from config import config_by_name
 
 SEED_EMPLOYEES = [
@@ -31,7 +33,10 @@ def _ensure_sqlite_directory(uri):
 def configure_logging(app):
     """Console handler (the terminal now, the service log later) + rotating file handler"""
     level = getattr(logging, str(app.config.get('LOG_LEVEL', 'INFO')).upper(), logging.INFO)
-    formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
+    if app.config.get('LOG_FORMAT') == 'json':
+        formatter = JsonFormatter()
+    else:
+        formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
 
     # Avoid duplicate handlers when create_app() is called more than once (tests)
     app.logger.handlers.clear()
@@ -66,6 +71,10 @@ def create_app(config_name=None):
     app.config.from_object(config_class)
 
     configure_logging(app)
+    if app.config.get('TRUSTED_PROXIES'):
+        # trust exactly N proxies for X-Forwarded-For/Proto: nginx (1), or the ALB and nginx (2)
+        hops = app.config['TRUSTED_PROXIES']
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops, x_host=0)
     app.logger.info('=' * 60)
     app.logger.info('%s starting (env=%s, debug=%s)', app.config['APP_NAME'],
                     config_name, app.config.get('DEBUG', False))
@@ -78,8 +87,9 @@ def create_app(config_name=None):
         from app.models import Employee
         try:
             db.create_all()
-        except OperationalError as e:           # two workers started at once on an empty database
-            if 'already exists' not in str(e):
+        except SQLAlchemyError as e:            # two workers started at once on an empty database
+            db.session.rollback()
+            if 'already exists' not in str(e) and 'duplicate key' not in str(e):
                 raise
         if app.config.get('SEED_DEMO_DATA') and Employee.query.count() == 0:
             try:
@@ -112,15 +122,9 @@ def create_app(config_name=None):
         db.session.rollback()
         return {'error': 'Internal server error'}, 500
 
-    # ---- Request logging -------------------------------------------------------
-    @app.before_request
-    def log_request():
-        app.logger.info('%s %s from %s', request.method, request.path, request.remote_addr)
-
-    @app.after_request
-    def log_response(response):
-        app.logger.info('Response status: %s', response.status_code)
-        return response
+    # ---- Request ID, request log, /metrics, /livez, tracing ----------------------
+    init_observability(app, db)
+    init_tracing(app, db)
 
     # ---- Home & health ---------------------------------------------------------
     @app.route('/')
@@ -135,17 +139,17 @@ def create_app(config_name=None):
                 'analytics': '/api/analytics/salary/statistics',
                 'departments': '/api/departments',
                 'health': '/health',
+                'liveness': '/livez',
+                'metrics': '/metrics',
+                'alerts': '/api/alerts',
             },
         }
 
     @app.route('/health')
     def health():
-        try:
-            db.session.execute(db.text('SELECT 1'))
-            db_status = 'healthy'
-        except Exception as e:
-            db_status = f'unhealthy: {str(e)}'
-            app.logger.error('Health check failed: %s', e)
+        healthy, db_status = check_database(db)
+        if not healthy:
+            app.logger.error('Health check failed: %s', db_status)
         return {
             'status': 'healthy' if db_status == 'healthy' else 'degraded',
             'database': db_status,

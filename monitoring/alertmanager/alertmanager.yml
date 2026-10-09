@@ -1,0 +1,27 @@
+# Phase 24 - routing: every alert goes to the application's webhook (history at GET /api/alerts).
+# Pages repeat every hour, tickets every 12 hours. Replace or add receivers (Slack, e-mail, PagerDuty) here.
+route:
+  receiver: ems-webhook
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    - matchers: ['severity="page"']
+      receiver: ems-webhook
+      repeat_interval: 1h
+
+receivers:
+  - name: ems-webhook
+    webhook_configs:
+      - url: http://app:5000/api/alerts
+        send_resolved: true
+
+# A fast burn already says everything a slow burn would: do not notify both
+inhibit_rules:
+  - source_matchers: ['alertname="EMSErrorBudgetFastBurn"']
+    target_matchers: ['alertname="EMSErrorBudgetSlowBurn"']
+  - source_matchers: ['alertname="EMSLatencyBudgetFastBurn"']
+    target_matchers: ['alertname="EMSLatencyBudgetSlowBurn"']
+  - source_matchers: ['alertname="EMSAppDown"']
+    target_matchers: ['alertname=~"EMSHighErrorRate|EMSHighLatency|EMSNoTraffic|EMSDatabaseDown"']

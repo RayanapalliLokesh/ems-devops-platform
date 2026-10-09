@@ -1,0 +1,90 @@
+# Phase 25 - `promtool test rules`: each alert fires when it should and stays silent when it should
+rule_files:
+  - ../rules/ems-slo.yml
+  - ../rules/ems-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 10% of requests fail for two hours: far above 14.4 x 0.5% -> the fast burn pages
+  - interval: 1m
+    input_series:
+      - series: 'ems_http_requests_total{job="ems-app",instance="app:5000",endpoint="/api/employees",method="GET",status="200"}'
+        values: '0+90x150'
+      - series: 'ems_http_requests_total{job="ems-app",instance="app:5000",endpoint="/api/employees",method="GET",status="500"}'
+        values: '0+10x150'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: EMSErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels: {severity: page, slo: availability}
+            exp_annotations:
+              summary: "Error budget burning 14.4x too fast: 2% of the weekly budget in 1 hour"
+              description: "5xx ratio is 10% (SLO allows 0.5%)."
+              runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSErrorBudgetFastBurn.md
+      - eval_time: 70m
+        alertname: EMSHighErrorRate
+        exp_alerts:
+          - exp_labels: {severity: ticket}
+            exp_annotations:
+              summary: "More than 5% of requests fail with a 5xx"
+              description: "5xx ratio is 10% over 5 minutes."
+              runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSHighErrorRate.md
+
+  # 0.1% errors is inside the budget: no burn alert, fast or slow
+  - interval: 1m
+    input_series:
+      - series: 'ems_http_requests_total{job="ems-app",instance="app:5000",endpoint="/api/employees",method="GET",status="200"}'
+        values: '0+999x400'
+      - series: 'ems_http_requests_total{job="ems-app",instance="app:5000",endpoint="/api/employees",method="GET",status="500"}'
+        values: '0+1x400'
+    alert_rule_test:
+      - eval_time: 6h
+        alertname: EMSErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 6h
+        alertname: EMSErrorBudgetSlowBurn
+        exp_alerts: []
+
+  # A short spike (5 minutes) is not a fast burn: the 1h window must agree with the 5m window
+  - interval: 1m
+    input_series:
+      - series: 'ems_http_requests_total{job="ems-app",instance="app:5000",endpoint="/",method="GET",status="200"}'
+        values: '0+100x60 6050+50x4 6350+100x30'
+      - series: 'ems_http_requests_total{job="ems-app",instance="app:5000",endpoint="/",method="GET",status="500"}'
+        values: '0x60 50+50x4 250x30'
+    alert_rule_test:
+      - eval_time: 64m
+        alertname: EMSErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: EMSErrorBudgetFastBurn
+        exp_alerts: []
+
+  # The app stops answering scrapes, and separately the database goes away
+  - interval: 1m
+    input_series:
+      - series: 'up{job="ems-app",instance="app:5000"}'
+        values: '1 1 0 0 0 0'
+      - series: 'ems_db_up{job="ems-app",instance="app:5000"}'
+        values: '1 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: EMSAppDown
+        exp_alerts:
+          - exp_labels: {severity: page, job: ems-app, instance: "app:5000"}
+            exp_annotations:
+              summary: "Prometheus cannot scrape the EMS application"
+              description: "app:5000 has not answered /metrics for 1 minute."
+              runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSAppDown.md
+      - eval_time: 5m
+        alertname: EMSDatabaseDown
+        exp_alerts:
+          - exp_labels: {severity: page, job: ems-app, instance: "app:5000"}
+            exp_annotations:
+              summary: "The application cannot reach PostgreSQL"
+              description: "SELECT 1 fails from app:5000; /health answers 503."
+              runbook_url: https://github.com/RayanapalliLokesh/ems-devops-platform/blob/main/docs/runbooks/EMSDatabaseDown.md
+      - eval_time: 1m
+        alertname: EMSAppDown
+        exp_alerts: []
