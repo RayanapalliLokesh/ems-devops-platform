@@ -1,0 +1,12 @@
+# Phase 17 replaced the systemd unit, host nginx and host PostgreSQL with containers. On a host that was built in
+# Phases 12-16 they are stopped and disabled here (data migration: scripts/linux/backup-db.sh --restore).
+- name: Gather service facts
+  ansible.builtin.service_facts:
+
+- name: Stop and disable the host services the containers replace
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: [ems, nginx, postgresql]
+  when: (item ~ '.service') in ansible_facts.services

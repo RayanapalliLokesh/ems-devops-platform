@@ -1,0 +1,15 @@
+# A stable name and virtual IP in front of the ready app pods: ems-app.ems.svc:80 -> pod :5000
+apiVersion: v1
+kind: Service
+metadata:
+  name: ems-app
+  labels:
+    app.kubernetes.io/name: ems-app
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ems-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

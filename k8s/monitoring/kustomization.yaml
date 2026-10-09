@@ -1,0 +1,23 @@
+# Phase 24 - Prometheus + Grafana in namespace "monitoring", scraping the EMS pods via their
+# prometheus.io/* annotations. Apply with scripts/k8s/k8s-monitoring.sh: it first creates the ConfigMaps
+# prometheus-rules (from monitoring/prometheus/rules/*.yml) and grafana-dashboards (from
+# monitoring/grafana/dashboards/*.json), because kustomize may not read files outside this folder.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: ems-monitoring
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - prometheus.yaml
+  - grafana.yaml
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml
+  - name: grafana-provisioning
+    files:
+      - datasources.yml
+      - dashboards.yml

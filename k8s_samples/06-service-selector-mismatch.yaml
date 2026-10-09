@@ -1,0 +1,33 @@
+# Symptom: pods are Running and Ready, but requests to the Service time out / are refused;
+# `kubectl get endpoints s06-web` shows <none>.
+# Cause: the Service selects app=s06-web, the pods are labelled app=s06.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s06-web
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s06}
+  template:
+    metadata:
+      labels: {app: s06}
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27.4-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            limits: {cpu: 100m, memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s06-web
+  namespace: ems-samples
+spec:
+  selector: {app: s06-web}
+  ports:
+    - port: 80

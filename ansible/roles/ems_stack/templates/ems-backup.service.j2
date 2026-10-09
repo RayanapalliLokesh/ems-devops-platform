@@ -1,0 +1,10 @@
+[Unit]
+Description=EMS PostgreSQL backup (pg_dump to local disk{{ ' and S3' if ems_backup_bucket else '' }})
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory={{ ems_root }}
+EnvironmentFile={{ ems_root }}/.env
+ExecStart=/usr/local/bin/ems-backup-db --project ems --dir /var/backups/ems{{ (' --s3-bucket ' ~ ems_backup_bucket) if ems_backup_bucket else '' }}

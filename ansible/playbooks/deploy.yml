@@ -1,0 +1,14 @@
+# Phase 19 - deploy one image tag: pull, restart, health check; the previous tag comes back if the check fails
+#   ansible-playbook -i inventories/aws/hosts.yml playbooks/deploy.yml -e ems_image_tag=v1.1.0
+- name: Deploy an EMS release
+  hosts: ems_hosts
+  become: true
+  tasks:
+    - name: Require the tag to deploy
+      ansible.builtin.assert:
+        that: ems_image_tag is defined and ems_image_tag | length > 0
+        fail_msg: "Pass -e ems_image_tag=<tag>"
+
+    - name: Deploy the stack
+      ansible.builtin.include_role:
+        name: ems_stack

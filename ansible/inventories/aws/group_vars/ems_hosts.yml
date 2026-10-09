@@ -1,0 +1,4 @@
+# Values for the EC2 host. hosts.yml next to this file is written by Terraform (terraform/envs/dev) and holds
+# the address, the ECR repository, the region, the backup bucket and the ALB name.
+ems_monitoring_enabled: true
+ems_gunicorn_workers: 2

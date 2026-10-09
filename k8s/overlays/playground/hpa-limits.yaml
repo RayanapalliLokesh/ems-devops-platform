@@ -1,0 +1,7 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ems-app
+spec:
+  minReplicas: 1
+  maxReplicas: 2               # 2 app pods + postgres-0 = the 3-pod namespace limit

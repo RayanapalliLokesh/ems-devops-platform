@@ -1,0 +1,13 @@
+# ansible-lint settings (Phase 18)
+profile: production
+exclude_paths:
+  - .github/
+  - k8s/
+  - k8s_samples/
+  - monitoring/
+  - terraform/
+  - venv/
+skip_list:
+  # The ems_ prefix is the project-wide namespace shared with the Terraform-generated inventory
+  # (ems_image, ems_backup_bucket ...), so role variables are not renamed to ems_stack_*.
+  - var-naming[no-role-prefix]

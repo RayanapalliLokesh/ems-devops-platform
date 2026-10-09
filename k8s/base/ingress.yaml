@@ -1,0 +1,41 @@
+# Phase 23 - HTTP entry point. Needs an ingress controller (ingress-nginx): on kind see
+# scripts/k8s/k8s-up.sh --ingress (host :8082); on EKS it sits behind an NLB.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ems
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ems-app
+                port:
+                  name: http
+---
+# /metrics is never public (the same rule as nginx/default.conf). Annotations apply per Ingress, so this one
+# matches only /metrics and denies every source address (403); Prometheus scrapes the pods directly.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ems-metrics-block
+  annotations:
+    nginx.ingress.kubernetes.io/denylist-source-range: "0.0.0.0/0,::/0"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: ems-app
+                port:
+                  name: http

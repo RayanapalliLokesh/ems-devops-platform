@@ -1,0 +1,66 @@
+# Phase 19 - run an earlier tag again. Nothing is rebuilt: the image is already in ECR.
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to roll back to (must exist in ECR, e.g. v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: cd-playground
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: rollback (playground)
+    runs-on: ubuntu-24.04
+    environment:
+      name: playground
+      url: ${{ vars.EMS_APP_URL }}
+    steps:
+      - name: Validate the tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+|sha-[0-9a-f]{7,40})$ ]] || { echo "invalid tag: $TAG" >&2; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: The tag must already be in ECR
+        env:
+          TAG: ${{ inputs.tag }}
+        run: aws ecr describe-images --repository-name ems-app --image-ids "imageTag=${TAG}" --query 'imageDetails[0].imagePushedAt'
+      - name: Roll back with Ansible
+        uses: ./.github/actions/ansible-deploy
+        with:
+          playbook: rollback.yml
+          image-tag: ${{ inputs.tag }}
+          host: ${{ secrets.EMS_HOST }}
+          ssh-key: ${{ secrets.EMS_SSH_KEY }}
+          host-sg-id: ${{ vars.EMS_HOST_SG_ID }}
+          ecr-repository: ${{ vars.EMS_ECR_REPOSITORY }}
+          backup-bucket: ${{ vars.EMS_BACKUP_BUCKET }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Smoke test through the load balancer
+        env:
+          APP_URL: ${{ vars.EMS_APP_URL }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          for _ in $(seq 1 20); do
+            if curl -fsS "$APP_URL/health" | grep -q "\"version\":\"${TAG}\""; then echo "serving ${TAG}"; exit 0; fi
+            sleep 6
+          done
+          echo "The load balancer does not serve ${TAG}" >&2
+          exit 1

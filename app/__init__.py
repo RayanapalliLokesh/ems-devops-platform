@@ -80,6 +80,13 @@ def create_app(config_name=None):
                     config_name, app.config.get('DEBUG', False))
 
     # ---- Database ----------------------------------------------------------
+    if make_url(app.config['SQLALCHEMY_DATABASE_URI']).drivername.startswith('postgresql'):
+        # fail fast instead of hanging a worker: unreachable database -> /health answers 503 within seconds
+        app.config.setdefault('SQLALCHEMY_ENGINE_OPTIONS', {
+            'pool_pre_ping': True,
+            'pool_recycle': 300,
+            'connect_args': {'connect_timeout': 3, 'options': '-c statement_timeout=10000'},
+        })
     db.init_app(app)
     _ensure_sqlite_directory(app.config['SQLALCHEMY_DATABASE_URI'])
 

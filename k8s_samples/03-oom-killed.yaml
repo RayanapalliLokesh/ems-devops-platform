@@ -1,0 +1,22 @@
+# Symptom: CrashLoopBackOff; describe shows Last State: Terminated, Reason: OOMKilled, exit code 137.
+# Cause: the process allocates ~64 MiB but the memory limit is 16Mi.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s03-oom-killed
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s03}
+  template:
+    metadata:
+      labels: {app: s03}
+    spec:
+      containers:
+        - name: hog
+          image: busybox:1.36
+          command: ["sh", "-c", "head -c 67108864 /dev/zero | tail > /dev/null; sleep 3600"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 16Mi}

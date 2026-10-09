@@ -7,6 +7,11 @@ follows from it. An ADR is never edited afterwards; a later decision that replac
 |---|---|---|
 | 0001 | Flask instead of FastAPI | 11 |
 | 0002 | Two versions: Full Local and Playground | 11 |
+| 0003 | PostgreSQL in a container on the host, not RDS | 12, 17 |
+| 0004 | Terraform creates the machine, Ansible configures it | 16, 20 |
+| 0005 | Keyless CD with GitHub OIDC; SSH opens only during a deploy | 19 |
+| 0006 | A release is one immutable image tag, built once | 17, 19 |
+| 0007 | Alert on SLO burn rate, not on raw thresholds | 25 |
 
 ## Template
 ```

@@ -1,0 +1,5 @@
+# All broken samples live in their own namespace so they never disturb the real app in "ems".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ems-samples

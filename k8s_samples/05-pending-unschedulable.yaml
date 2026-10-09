@@ -1,0 +1,21 @@
+# Symptom: STATUS Pending forever, no node assigned; event FailedScheduling "Insufficient cpu".
+# Cause: the pod requests 64 CPUs - no node is that big.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s05-pending-unschedulable
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s05}
+  template:
+    metadata:
+      labels: {app: s05}
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27.4-alpine
+          resources:
+            requests: {cpu: "64", memory: 64Mi}
+            limits: {cpu: "64", memory: 64Mi}

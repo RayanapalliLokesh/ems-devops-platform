@@ -1,0 +1,24 @@
+# Phase 19 - roll back to an older tag that is already in the registry; nothing is rebuilt
+#   ansible-playbook -i inventories/aws/hosts.yml playbooks/rollback.yml -e ems_image_tag=v1.0.0
+- name: Roll back EMS to an earlier release
+  hosts: ems_hosts
+  become: true
+  tasks:
+    - name: Require the tag to roll back to
+      ansible.builtin.assert:
+        that: ems_image_tag is defined and ems_image_tag | length > 0
+        fail_msg: "Pass -e ems_image_tag=<previous tag>"
+
+    - name: Read the release that is running now
+      ansible.builtin.slurp:
+        src: /opt/ems/RELEASE
+      register: ems_running
+      failed_when: false
+
+    - name: Show what changes
+      ansible.builtin.debug:
+        msg: "Rolling back from {{ (ems_running.content | default('') | b64decode | trim) or 'unknown' }} to {{ ems_image_tag }}"
+
+    - name: Deploy the earlier tag
+      ansible.builtin.include_role:
+        name: ems_stack

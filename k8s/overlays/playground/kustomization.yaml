@@ -1,0 +1,15 @@
+# Phase 23 - EKS in the playground. Limits: 3 pods per namespace, <= 256m CPU / 512Mi per pod.
+# 2 app pods + postgres-0 = 3 pods; rolling updates replace pods one by one without a surge pod.
+# The image placeholders are replaced by scripts/k8s/k8s-playground.sh (or `kustomize edit set image`).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: ems-app
+    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/ems-app
+    newTag: IMAGE_TAG
+patches:
+  - path: deployment-limits.yaml
+  - path: hpa-limits.yaml
+  - path: postgres-limits.yaml

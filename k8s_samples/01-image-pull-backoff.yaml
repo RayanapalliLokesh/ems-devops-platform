@@ -1,0 +1,20 @@
+# Symptom: STATUS ErrImagePull -> ImagePullBackOff, the container never starts.
+# Cause: the tag does not exist in the registry.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s01-image-pull-backoff
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s01}
+  template:
+    metadata:
+      labels: {app: s01}
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27.4-alpine-does-not-exist
+          resources:
+            limits: {cpu: 100m, memory: 64Mi}

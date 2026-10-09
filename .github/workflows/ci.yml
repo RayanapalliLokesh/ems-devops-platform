@@ -1,0 +1,135 @@
+# Phase 18 - every push and pull request: lint, test, scan, build. No job needs a secret.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: lint-and-test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: flake8
+        run: flake8
+      - name: pytest (application, platform files, SLO rules with promtool)
+        run: FLASK_ENV=testing pytest -q --cov=app --cov-report=term-missing:skip-covered tests
+
+  scripts-and-yaml:
+    name: scripts-and-yaml
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        run: find . -name '*.sh' -not -path './venv/*' -print0 | xargs -0 shellcheck
+      - name: yamllint
+        run: pip install yamllint==1.37.1 && yamllint .
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+  docker:
+    name: docker
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+      - name: Build the image
+        run: docker build --build-arg "APP_VERSION=ci-${GITHUB_SHA::7}" --build-arg "VCS_REF=${GITHUB_SHA}" -t ems-app:ci .
+      - name: Image review
+        run: scripts/image-report.sh ems-app:ci --max-size-mb 600
+      - name: Compose smoke test
+        run: |
+          printf 'POSTGRES_PASSWORD=%s\nSECRET_KEY=%s\nEMS_IMAGE_TAG=ci\nEMS_HTTP_PORT=8080\n' \
+            "$(openssl rand -hex 16)" "$(openssl rand -hex 32)" > .env.ci
+          docker compose --env-file .env.ci up -d --wait --wait-timeout 180
+          scripts/net/netcheck.sh --host 127.0.0.1 --port 8080
+          curl -fsS -X POST localhost:8080/api/employees -H 'content-type: application/json' \
+            -d '{"name":"CI Bot","age":30,"department":"QA","email":"ci@company.com","salary":50000}'
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/metrics)" = 404
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose --env-file .env.ci logs --no-color | tail -200
+      - name: Trivy scan (fail on fixable critical CVEs)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ems-app:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  ansible:
+    name: ansible
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ansible
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ansible-lint
+        run: pip install ansible-lint==25.9.2
+      - name: ansible-lint
+        run: ansible-lint --offline
+      - name: Syntax check every playbook
+        run: |
+          for p in playbooks/*.yml; do
+            ansible-playbook -i inventories/local/hosts.yml "$p" --syntax-check
+          done
+
+  terraform:
+    name: terraform
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: terraform fmt
+        run: terraform fmt -check -recursive terraform
+      - name: Playground policy check (no NAT in dev, small instances, standard credits)
+        run: python3 terraform/tf_static_check.py
+      - name: validate and test every configuration
+        run: |
+          for d in terraform/modules/* terraform/bootstrap-state terraform/registry terraform/envs/dev terraform/envs/prod terraform/eks; do
+            echo "::group::$d"
+            terraform -chdir="$d" init -backend=false -input=false >/dev/null
+            terraform -chdir="$d" validate
+            if [ -d "$d/tests" ]; then terraform -chdir="$d" test; fi
+            echo "::endgroup::"
+          done
+
+  security:
+    name: security
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pip-audit
+        run: pip install pip-audit==2.9.0 && pip-audit -r requirements.txt

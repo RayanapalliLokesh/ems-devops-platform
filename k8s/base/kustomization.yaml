@@ -1,0 +1,29 @@
+# Phase 22 - Kustomize base: everything the EMS app needs in namespace "ems".
+# Overlays (local = kind, playground = EKS) change only the image, replicas, Service type and limits.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ems
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: ems
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - app-deployment.yaml
+  - app-service.yaml
+  - networkpolicy.yaml
+  - ingress.yaml
+  - hpa.yaml
+configMapGenerator:
+  - name: ems-config
+    envs:
+      - config.env
+secretGenerator:
+  # secret.env is gitignored; copy secret.env.example or let scripts/k8s/k8s-up.sh generate it
+  - name: ems-secret
+    envs:
+      - secret.env
+images:
+  - name: ems-app
+    newTag: local

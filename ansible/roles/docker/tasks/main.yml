@@ -1,0 +1,38 @@
+- name: Install Docker
+  ansible.builtin.dnf:
+    name: docker
+    state: present
+  when: ansible_facts.pkg_mgr in ['dnf', 'dnf5']
+
+- name: Create the CLI plugin directory
+  ansible.builtin.file:
+    path: /usr/local/lib/docker/cli-plugins
+    state: directory
+    mode: "0755"
+
+- name: Install the Docker Compose plugin (pinned, checksum verified)
+  ansible.builtin.get_url:
+    url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-x86_64"
+    checksum: "sha256:https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-linux-x86_64.sha256"
+    dest: /usr/local/lib/docker/cli-plugins/docker-compose
+    mode: "0755"
+
+- name: Configure the Docker daemon (log rotation, live restore)
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+  notify: Restart docker
+
+- name: Start Docker at boot
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Let the admin users run docker
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_users }}"

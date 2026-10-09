@@ -1,0 +1,14 @@
+ems_root: /opt/ems
+ems_repo_root: "{{ playbook_dir | dirname | dirname }}"
+ems_image: ems-app
+ems_image_tag: local
+ems_ecr_registry: ""
+ems_aws_region: us-east-1
+ems_backup_bucket: ""
+ems_trusted_proxies: 2
+ems_monitoring_enabled: true
+ems_gunicorn_workers: 2
+ems_http_port: 80
+ems_health_url: "http://127.0.0.1:{{ ems_http_port }}/health"
+ems_health_retries: 24
+ems_seed_demo_data: true

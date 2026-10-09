@@ -17,3 +17,7 @@ rules:
     max-spaces-inside: 1
   indentation:
     indent-sequences: consistent
+  comments-indentation: false
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

@@ -1,0 +1,77 @@
+# Symptom: the client logs "db:5432 unreachable" (timeouts, not "connection refused"); both pods are Running.
+# Cause: the NetworkPolicy on the database only admits pods labelled role=api, and the client is role=web.
+# Needs a CNI that enforces NetworkPolicy (kindnet in kind >= 0.24, Calico, VPC CNI with policies on EKS).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s08-db
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s08-db}
+  template:
+    metadata:
+      labels: {app: s08-db}
+    spec:
+      containers:
+        - name: db                       # stands in for PostgreSQL: listens on 5432
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do echo ok | nc -l -p 5432; done"]
+          ports:
+            - containerPort: 5432
+          resources:
+            limits: {cpu: 50m, memory: 32Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s08-db
+  namespace: ems-samples
+spec:
+  selector: {app: s08-db}
+  ports:
+    - port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: s08-db-allow-api
+  namespace: ems-samples
+spec:
+  podSelector:
+    matchLabels: {app: s08-db}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {role: api}
+      ports:
+        - port: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s08-client
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s08-client}
+  template:
+    metadata:
+      labels: {app: s08-client, role: web}
+    spec:
+      containers:
+        - name: client
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              while true; do
+                if nc -w 3 s08-db 5432 < /dev/null > /dev/null; then echo "db:5432 reachable"; else echo "db:5432 unreachable"; fi
+                sleep 5
+              done
+          resources:
+            limits: {cpu: 50m, memory: 32Mi}

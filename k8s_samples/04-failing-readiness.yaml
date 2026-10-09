@@ -1,0 +1,35 @@
+# Symptom: STATUS Running but READY 0/1, RESTARTS 0; the Service has no endpoints.
+# Cause: the readiness probe asks for /healthz, which nginx answers with 404.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s04-failing-readiness
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s04}
+  template:
+    metadata:
+      labels: {app: s04}
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27.4-alpine
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: {path: /healthz, port: 80}
+            periodSeconds: 5
+          resources:
+            limits: {cpu: 100m, memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s04-failing-readiness
+  namespace: ems-samples
+spec:
+  selector: {app: s04}
+  ports:
+    - port: 80

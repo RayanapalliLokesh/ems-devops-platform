@@ -1,0 +1,29 @@
+# Phase 22 - a one-node kind cluster named "ems"
+#   host :8081 -> node :30080 (NodePort of Service ems-app, overlay local)
+#   host :8082 -> node :80    (ingress-nginx, optional: scripts/k8s/k8s-up.sh --ingress)
+#   host :8443 -> node :443
+# Host port 8080 is left free for the Docker Compose stack; 80/443 are not used on the host.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ems
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 8081
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+      - containerPort: 80
+        hostPort: 8082
+        listenAddress: "127.0.0.1"
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 8443
+        listenAddress: "127.0.0.1"
+        protocol: TCP

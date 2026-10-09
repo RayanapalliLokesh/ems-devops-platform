@@ -1,0 +1,21 @@
+- name: Point the stack back at the previous tag
+  ansible.builtin.set_fact:
+    ems_deploy_tag: "{{ ems_previous_tag }}"
+
+- name: Write the settings of the previous release
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ ems_root }}/.env"
+    mode: "0600"
+
+- name: Start the previous release
+  ansible.builtin.command:
+    cmd: "{{ ems_compose }} up -d --remove-orphans --wait --wait-timeout 240"
+    chdir: "{{ ems_root }}"
+  changed_when: true
+
+- name: Record the restored release
+  ansible.builtin.copy:
+    dest: "{{ ems_root }}/RELEASE"
+    content: "{{ ems_previous_tag }}\n"
+    mode: "0644"

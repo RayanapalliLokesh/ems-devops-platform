@@ -1,0 +1,147 @@
+# Phase 19 - a version tag becomes a running release:
+#   build once (ghcr.io) -> copy the same image to ECR -> human approval -> Ansible deploy -> smoke test -> release
+# The deploy jobs are opt-in: they run only when scripts/setup-cd.sh has set the variables and secrets.
+name: CD
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-playground
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ems-app
+
+jobs:
+  build:
+    name: build (ghcr.io)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name
+        id: meta
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push (the version tag only; no "latest")
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ github.ref_name }}
+          build-args: |
+            APP_VERSION=${{ github.ref_name }}
+            VCS_REF=${{ github.sha }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  push-ecr:
+    name: copy to ECR
+    needs: build
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Copy the manifest (same digest, nothing rebuilt)
+        env:
+          SOURCE: ${{ needs.build.outputs.image }}@${{ needs.build.outputs.digest }}
+          TARGET: ${{ vars.EMS_ECR_REPOSITORY }}:${{ github.ref_name }}
+        run: |
+          docker buildx imagetools create --tag "$TARGET" "$SOURCE"
+          docker buildx imagetools inspect "$TARGET" | head -5
+
+  deploy-playground:
+    name: deploy (playground)
+    needs: push-ecr
+    runs-on: ubuntu-24.04
+    environment:
+      name: playground
+      url: ${{ vars.EMS_APP_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Deploy with Ansible
+        uses: ./.github/actions/ansible-deploy
+        with:
+          playbook: deploy.yml
+          image-tag: ${{ github.ref_name }}
+          host: ${{ secrets.EMS_HOST }}
+          ssh-key: ${{ secrets.EMS_SSH_KEY }}
+          host-sg-id: ${{ vars.EMS_HOST_SG_ID }}
+          ecr-repository: ${{ vars.EMS_ECR_REPOSITORY }}
+          backup-bucket: ${{ vars.EMS_BACKUP_BUCKET }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Smoke test through the load balancer
+        env:
+          APP_URL: ${{ vars.EMS_APP_URL }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          for _ in $(seq 1 20); do
+            body="$(curl -fsS "$APP_URL/health" || true)"
+            echo "$body"
+            if echo "$body" | grep -q "\"version\":\"${TAG}\""; then
+              curl -fsS "$APP_URL/api/employees" | head -c 200; echo
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "The load balancer does not serve ${TAG}" >&2
+          exit 1
+
+  release:
+    name: GitHub release
+    needs: [build, deploy-playground]
+    if: always() && needs.build.result == 'success' && needs.deploy-playground.result != 'failure'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          DEPLOYED: ${{ needs.deploy-playground.result }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes \
+            --notes "Image: \`${IMAGE}:${GITHUB_REF_NAME}\` (\`${DIGEST}\`). Playground deploy: ${DEPLOYED}."

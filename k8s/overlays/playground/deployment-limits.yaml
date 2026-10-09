@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ems-app
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0              # a surge pod would be the 4th pod in the namespace: rejected by the quota
+      maxUnavailable: 1
+  template:
+    spec:
+      containers:
+        - name: app
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GUNICORN_WORKERS
+              value: "2"
+          resources:
+            requests: {cpu: 100m, memory: 192Mi}
+            limits: {cpu: 250m, memory: 384Mi}

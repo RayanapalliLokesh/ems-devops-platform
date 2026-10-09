@@ -1,0 +1,8 @@
+# Phase 16-17 - a finished EMS host: base system, Docker, and the application stack
+- name: Configure EMS hosts
+  hosts: ems_hosts
+  become: true
+  roles:
+    - common
+    - docker
+    - ems_stack

@@ -1,0 +1,3 @@
+# Real secrets never go to git: scripts/k8s/k8s-up.sh generates secret.env from secret.env.example
+**/secret.env
+secret.env

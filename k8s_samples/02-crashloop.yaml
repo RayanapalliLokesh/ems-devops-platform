@@ -1,0 +1,21 @@
+# Symptom: STATUS CrashLoopBackOff, RESTARTS keeps growing, exit code 127.
+# Cause: the command does not exist in the image.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s02-crashloop
+  namespace: ems-samples
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: s02}
+  template:
+    metadata:
+      labels: {app: s02}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["/bin/start-server", "--port", "8080"]
+          resources:
+            limits: {cpu: 100m, memory: 32Mi}

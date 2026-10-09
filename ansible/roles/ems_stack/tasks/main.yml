@@ -1,0 +1,165 @@
+# Phase 17 - the application as a Compose stack. Secrets are generated on the host once and never leave it.
+- name: Retire the Phase 12-16 host services if this host still has them
+  ansible.builtin.include_tasks: retire.yml
+  when: ansible_connection != 'local'
+
+- name: Create the stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ ems_root }}"
+    - "{{ ems_root }}/nginx"
+    - "{{ ems_root }}/monitoring"
+    - /var/backups/ems
+
+- name: Copy the Compose files
+  ansible.builtin.copy:
+    src: "{{ ems_repo_root }}/{{ item }}"
+    dest: "{{ ems_root }}/{{ item }}"
+    mode: "0644"
+  loop:
+    - docker-compose.yml
+    - docker-compose.monitoring.yml
+    - nginx/default.conf
+
+- name: Copy the monitoring configuration
+  ansible.builtin.copy:
+    src: "{{ ems_repo_root }}/monitoring/{{ item }}"
+    dest: "{{ ems_root }}/monitoring/"
+    mode: "0644"
+    directory_mode: "0755"
+  loop: [prometheus, alertmanager, grafana]
+  when: ems_monitoring_enabled | bool
+
+- name: Generate the application secrets once (kept on the host only)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    {
+      echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+      echo "SECRET_KEY=$(openssl rand -hex 32)"
+      echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -hex 12)"
+    } > {{ ems_root }}/secrets.env
+  args:
+    creates: "{{ ems_root }}/secrets.env"
+    executable: /bin/bash
+
+- name: Read the secrets
+  ansible.builtin.slurp:
+    src: "{{ ems_root }}/secrets.env"
+  register: ems_secrets_file
+  no_log: true
+
+- name: Parse the secrets
+  ansible.builtin.set_fact:
+    ems_secrets: "{{ dict(ems_secrets_file.content | b64decode | trim | split('\n') | map('split', '=', 1)) }}"
+  no_log: true
+
+- name: Read the release that is running now
+  ansible.builtin.slurp:
+    src: "{{ ems_root }}/RELEASE"
+  register: ems_release_file
+  failed_when: false
+
+- name: Remember the previous release
+  ansible.builtin.set_fact:
+    ems_previous_tag: "{{ (ems_release_file.content | default('') | b64decode | trim) }}"
+    ems_deploy_tag: "{{ ems_image_tag }}"
+    ems_compose: >-
+      docker compose --project-name ems -f docker-compose.yml
+      {{ '-f docker-compose.monitoring.yml' if ems_monitoring_enabled | bool else '' }}
+
+- name: Log in to ECR with the instance role
+  ansible.builtin.shell: |
+    set -euo pipefail
+    aws ecr get-login-password --region {{ ems_aws_region }} | docker login --username AWS --password-stdin {{ ems_ecr_registry }}
+  args:
+    executable: /bin/bash
+  when: ems_ecr_registry | length > 0
+  changed_when: false
+  no_log: true
+
+- name: Deploy, check, and roll back on failure
+  block:
+    - name: Write the stack settings for this release
+      ansible.builtin.template:
+        src: env.j2
+        dest: "{{ ems_root }}/.env"
+        mode: "0600"
+
+    - name: Pull the images
+      ansible.builtin.command:
+        cmd: "{{ ems_compose }} pull --quiet"
+        chdir: "{{ ems_root }}"
+      register: ems_pull
+      changed_when: false   # a pull only refreshes the cache; "up" reports whether a container changed
+
+    - name: Start the stack and wait for the health checks
+      ansible.builtin.command:
+        cmd: "{{ ems_compose }} up -d --remove-orphans --wait --wait-timeout 240"
+        chdir: "{{ ems_root }}"
+      register: ems_up
+      changed_when: "'Started' in ems_up.stderr or 'Recreated' in ems_up.stderr or 'Created' in ems_up.stderr"
+
+    - name: Check /health through nginx
+      ansible.builtin.uri:
+        url: "{{ ems_health_url }}"
+        status_code: 200
+        return_content: true
+      register: ems_health
+      retries: "{{ ems_health_retries }}"
+      delay: 5
+      until: ems_health.status == 200
+
+    - name: Record the release
+      ansible.builtin.copy:
+        dest: "{{ ems_root }}/RELEASE"
+        content: "{{ ems_deploy_tag }}\n"
+        mode: "0644"
+
+    - name: Keep the release history
+      ansible.builtin.lineinfile:
+        path: "{{ ems_root }}/RELEASES.log"
+        line: "{{ now(utc=true).isoformat() }} {{ ems_deploy_tag }}"
+        create: true
+        mode: "0644"
+      changed_when: false
+
+  rescue:
+    - name: Roll back to the previous release
+      ansible.builtin.include_tasks: restore.yml
+      when: ems_previous_tag | length > 0 and ems_previous_tag != ems_image_tag
+
+    - name: Fail the deploy
+      ansible.builtin.fail:
+        msg: >-
+          Release {{ ems_image_tag }} did not become healthy.
+          {{ ('Restored ' ~ ems_previous_tag ~ '.') if (ems_previous_tag | length > 0 and ems_previous_tag != ems_image_tag)
+             else 'There was no earlier release to restore.' }}
+
+- name: Install the backup script
+  ansible.builtin.copy:
+    src: "{{ ems_repo_root }}/scripts/linux/backup-db.sh"
+    dest: /usr/local/bin/ems-backup-db
+    mode: "0755"
+
+- name: Install the backup service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [ems-backup.service, ems-backup.timer]
+  notify: Reload systemd
+
+- name: Flush handlers so systemd knows the timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Run backups every night
+  ansible.builtin.systemd_service:
+    name: ems-backup.timer
+    state: started
+    enabled: true

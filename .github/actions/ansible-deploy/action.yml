@@ -1,0 +1,103 @@
+# Shared by cd.yml and rollback.yml: open SSH for this runner only, run one Ansible playbook, close SSH again
+name: ansible-deploy
+description: Run an EMS Ansible playbook against the playground host with a temporary SSH rule
+inputs:
+  playbook:
+    description: deploy.yml or rollback.yml
+    required: true
+  image-tag:
+    description: Image tag to run
+    required: true
+  host:
+    description: Public address of the EC2 host (secret EMS_HOST)
+    required: true
+  ssh-key:
+    description: Private deploy key (secret EMS_SSH_KEY)
+    required: true
+  host-sg-id:
+    description: Security group of the host (variable EMS_HOST_SG_ID)
+    required: true
+  ecr-repository:
+    description: ECR repository URL (variable EMS_ECR_REPOSITORY)
+    required: true
+  backup-bucket:
+    description: S3 backup bucket (variable EMS_BACKUP_BUCKET)
+    required: false
+    default: ""
+  aws-region:
+    required: false
+    default: us-east-1
+runs:
+  using: composite
+  steps:
+    - name: Open SSH for this runner
+      id: ssh-rule
+      shell: bash
+      env:
+        SG_ID: ${{ inputs.host-sg-id }}
+      run: |
+        ip="$(curl -fsS https://checkip.amazonaws.com)"
+        rule_id="$(aws ec2 authorize-security-group-ingress --group-id "$SG_ID" \
+          --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${ip}/32,Description=github-actions-${GITHUB_RUN_ID}}]" \
+          --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)"
+        echo "rule-id=$rule_id" >> "$GITHUB_OUTPUT"
+        echo "SSH opened for ${ip}/32 ($rule_id)"
+
+    - name: Install Ansible and write the inventory
+      shell: bash
+      env:
+        EMS_HOST: ${{ inputs.host }}
+        EMS_SSH_KEY: ${{ inputs.ssh-key }}
+        ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+        BACKUP_BUCKET: ${{ inputs.backup-bucket }}
+        AWS_REGION_NAME: ${{ inputs.aws-region }}
+      run: |
+        pip install --quiet ansible-core==2.17.7
+        install -m 700 -d ~/.ssh
+        printf '%s\n' "$EMS_SSH_KEY" > ~/.ssh/ems-deploy && chmod 600 ~/.ssh/ems-deploy
+        cat > ansible/inventories/aws/hosts.yml <<YAML
+        all:
+          children:
+            ems_hosts:
+              hosts:
+                ems-host:
+                  ansible_host: "${EMS_HOST}"
+                  ansible_user: ec2-user
+                  ansible_ssh_private_key_file: ~/.ssh/ems-deploy
+              vars:
+                ems_environment: dev
+                ems_image: "${ECR_REPOSITORY}"
+                ems_ecr_registry: "${ECR_REPOSITORY%%/*}"
+                ems_aws_region: "${AWS_REGION_NAME}"
+                ems_backup_bucket: "${BACKUP_BUCKET}"
+                ems_trusted_proxies: 2
+        YAML
+
+    - name: Wait for SSH
+      shell: bash
+      env:
+        EMS_HOST: ${{ inputs.host }}
+      run: |
+        for _ in $(seq 1 20); do
+          if timeout 5 bash -c "</dev/tcp/${EMS_HOST}/22" 2>/dev/null; then exit 0; fi
+          sleep 3
+        done
+        echo "SSH on ${EMS_HOST} did not open" >&2
+        exit 1
+
+    - name: Run the playbook
+      shell: bash
+      working-directory: ansible
+      env:
+        PLAYBOOK: ${{ inputs.playbook }}
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        ANSIBLE_FORCE_COLOR: "1"
+      run: ansible-playbook -i inventories/aws/hosts.yml "playbooks/${PLAYBOOK}" -e "ems_image_tag=${IMAGE_TAG}"
+
+    - name: Close SSH again
+      if: always() && steps.ssh-rule.outputs.rule-id != ''
+      shell: bash
+      env:
+        SG_ID: ${{ inputs.host-sg-id }}
+        RULE_ID: ${{ steps.ssh-rule.outputs.rule-id }}
+      run: aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --security-group-rule-ids "$RULE_ID" >/dev/null && echo "SSH closed"

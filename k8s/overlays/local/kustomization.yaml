@@ -1,0 +1,12 @@
+# Phase 22 - kind: the locally built image (loaded with `kind load docker-image ems-app:local`),
+# reachable on http://localhost:8081 (host :8081 -> node :30080, see k8s/kind-config.yaml)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: ems-app
+    newName: ems-app
+    newTag: local
+patches:
+  - path: service-nodeport.yaml

@@ -1,0 +1,13 @@
+# kubectl apply -k k8s_samples      (namespace ems-samples; remove with: kubectl delete namespace ems-samples)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - 01-image-pull-backoff.yaml
+  - 02-crashloop.yaml
+  - 03-oom-killed.yaml
+  - 04-failing-readiness.yaml
+  - 05-pending-unschedulable.yaml
+  - 06-service-selector-mismatch.yaml
+  - 07-missing-configmap.yaml
+  - 08-networkpolicy-blocks-db.yaml
