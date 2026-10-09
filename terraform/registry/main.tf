@@ -73,7 +73,9 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:*"]
+      # classic subject (repo:owner/name:...) and, for newer repositories, the immutable one with the owner and
+      # repository IDs (repo:owner@123/name@456:...; gh api repos/OWNER/REPO/actions/oidc/customization/sub)
+      values = compact(["repo:${var.github_repository}:*", var.github_sub_prefix == "" ? "" : "${var.github_sub_prefix}:*"])
     }
   }
 }
@@ -138,6 +140,12 @@ variable "region" {
 
 variable "github_repository" {
   description = "owner/name allowed to assume the deploy role; empty = no OIDC role"
+  type        = string
+  default     = ""
+}
+
+variable "github_sub_prefix" {
+  description = "Immutable OIDC subject prefix of the repository, e.g. repo:owner@123/name@456 (empty = classic only)"
   type        = string
   default     = ""
 }

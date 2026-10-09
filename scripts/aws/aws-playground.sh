@@ -48,7 +48,11 @@ case "${args[0]}" in
     ;;
   registry)
     run terraform -chdir="$TF/registry" init -input=false -reconfigure -backend-config=../backend.hcl
-    plan_and_apply "$TF/registry" -var "github_repository=$REPO_SLUG"
+    sub_prefix=""
+    if ! $DRY_RUN && command -v gh >/dev/null; then   # newer repositories use immutable OIDC subjects (owner@id/name@id)
+      sub_prefix="$(gh api "repos/$REPO_SLUG/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null || true)"
+    fi
+    plan_and_apply "$TF/registry" -var "github_repository=$REPO_SLUG" -var "github_sub_prefix=$sub_prefix"
     ;;
   up)
     [ -f "$KEY" ] || run ssh-keygen -q -t ed25519 -N '' -C ems-deploy -f "$KEY"
@@ -79,7 +83,7 @@ case "${args[0]}" in
   outputs) run terraform -chdir="$TF/envs/dev" output ;;
   down)
     for dir in envs/dev registry bootstrap-state; do
-      if [ "$dir" = registry ]; then extra=(-var "github_repository=$REPO_SLUG"); else extra=(); fi
+      if [ "$dir" = registry ]; then extra=(-var "github_repository=$REPO_SLUG" -var "github_sub_prefix=x"); else extra=(); fi
       run terraform -chdir="$TF/$dir" plan -destroy -input=false -out=tfplan "${extra[@]}"
       if ! $DRY_RUN; then
         read -r -p "Destroy $dir? [y/N] " answer
