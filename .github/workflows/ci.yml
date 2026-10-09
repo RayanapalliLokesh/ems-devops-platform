@@ -72,13 +72,9 @@ jobs:
         if: failure()
         run: docker compose --env-file .env.ci logs --no-color | tail -200
       - name: Trivy scan (fail on fixable critical CVEs)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ems-app:ci
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-          format: table
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.58.1 \
+            image --quiet --severity CRITICAL --ignore-unfixed --exit-code 1 ems-app:ci
 
   ansible:
     name: ansible
@@ -108,7 +104,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.8
+          terraform_version: 1.15.8
       - name: terraform fmt
         run: terraform fmt -check -recursive terraform
       - name: Playground policy check (no NAT in dev, small instances, standard credits)
@@ -118,7 +114,9 @@ jobs:
           for d in terraform/modules/* terraform/bootstrap-state terraform/registry terraform/envs/dev terraform/envs/prod terraform/eks; do
             echo "::group::$d"
             terraform -chdir="$d" init -backend=false -input=false >/dev/null
-            terraform -chdir="$d" validate
+            # a module that declares a provider alias (host_role: aws.untagged) cannot be validated as a root;
+            # it is validated through envs/dev and by its own terraform test
+            if ! grep -q configuration_aliases "$d"/*.tf; then terraform -chdir="$d" validate; fi
             if [ -d "$d/tests" ]; then terraform -chdir="$d" test; fi
             echo "::endgroup::"
           done

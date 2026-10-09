@@ -1,5 +1,6 @@
 # Phase 21 - prod: the same modules as dev with production values. PLANNED ONLY (never applied in the playground):
-# private host (no public IP, no SSH: deploys through SSM or a bastion), one NAT gateway per zone
+# private host (no public IP, no SSH), one NAT gateway per zone. Not built yet: the access path for deploys
+# (a bastion, or SSM with AmazonSSMManagedInstanceCore on the host role) - see docs/terraform/review-checklist.md
 terraform {
   required_version = ">= 1.7"
   required_providers {
