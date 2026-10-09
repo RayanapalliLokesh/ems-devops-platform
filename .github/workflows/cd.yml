@@ -143,5 +143,10 @@ jobs:
           DIGEST: ${{ needs.build.outputs.digest }}
           DEPLOYED: ${{ needs.deploy-playground.result }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes \
-            --notes "Image: \`${IMAGE}:${GITHUB_REF_NAME}\` (\`${DIGEST}\`). Playground deploy: ${DEPLOYED}."
+          notes="Image: \`${IMAGE}:${GITHUB_REF_NAME}\` (\`${DIGEST}\`). Playground deploy: ${DEPLOYED}."
+          # a re-run (e.g. after approving a deploy that waited) updates the release instead of failing
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes "$notes"
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --notes "$notes"
+          fi
